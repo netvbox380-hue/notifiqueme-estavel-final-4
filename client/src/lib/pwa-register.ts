@@ -19,6 +19,7 @@ export function isPwaRuntimeDisabled() {
 
 async function cleanupOldRegistrations() {
   const regs = await navigator.serviceWorker.getRegistrations();
+
   for (const reg of regs) {
     const scriptUrl =
       (reg.active && reg.active.scriptURL) ||
@@ -27,7 +28,9 @@ async function cleanupOldRegistrations() {
       "";
 
     const pathname = scriptUrl ? new URL(scriptUrl).pathname : "";
+
     if (pathname && pathname !== "/sw.js") {
+      console.log("[PWA] Removendo SW antigo:", pathname);
       await reg.unregister();
     }
   }
@@ -49,6 +52,7 @@ async function cleanupDevArtifacts() {
 
 async function sendSkipWaiting(registration: ServiceWorkerRegistration) {
   if (!registration.waiting) return;
+
   try {
     registration.waiting.postMessage({ type: "SKIP_WAITING" });
   } catch (error) {
@@ -57,9 +61,13 @@ async function sendSkipWaiting(registration: ServiceWorkerRegistration) {
 }
 
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
-  if (!("serviceWorker" in navigator)) return null;
+  if (!("serviceWorker" in navigator)) {
+    console.warn("[PWA] Service Worker não suportado.");
+    return null;
+  }
 
   if (isPwaRuntimeDisabled()) {
+    console.log("[PWA] Ambiente dev detectado. Limpando SW.");
     await cleanupDevArtifacts();
     return null;
   }
@@ -72,10 +80,23 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
   try {
     await cleanupOldRegistrations();
 
-    const registration =
+    let registration =
       (await navigator.serviceWorker.getRegistration("/")) ||
-      (await navigator.serviceWorker.getRegistration()) ||
-      (await navigator.serviceWorker.register("/sw.js", { scope: "/" }));
+      (await navigator.serviceWorker.getRegistration());
+
+    if (!registration) {
+      console.log("[PWA] Registrando novo Service Worker...");
+      registration = await navigator.serviceWorker.register("/sw.js", {
+        scope: "/",
+      });
+    } else {
+      console.log("[PWA] Service Worker já existente.");
+    }
+
+    // força verificação de update
+    try {
+      await registration.update();
+    } catch {}
 
     await sendSkipWaiting(registration);
 
@@ -85,7 +106,7 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
 
       newWorker.addEventListener("statechange", async () => {
         if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-          console.log("[PWA] Update disponível. Tentando ativar…");
+          console.log("[PWA] Update disponível. Ativando nova versão...");
           await sendSkipWaiting(registration);
         }
       });
@@ -93,15 +114,19 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
 
     const onControllerChange = () => {
       if (hasReloaded()) return;
+
       markReloaded();
-      console.log("[PWA] SW assumiu controle. Recarregando…");
+      console.log("[PWA] SW assumiu controle. Recarregando app...");
       window.location.reload();
     };
 
-    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange, { once: true });
+    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange, {
+      once: true,
+    });
+
     window.addEventListener("pageshow", clearReloaded, { once: true });
 
-    console.log("[PWA] Service Worker registrado");
+    console.log("[PWA] Service Worker registrado com sucesso:", registration);
     return registration;
   } catch (error) {
     console.warn("[PWA] Falha ao registrar Service Worker:", error);
@@ -111,6 +136,7 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
 
 export async function unregisterServiceWorkers(): Promise<void> {
   if (!("serviceWorker" in navigator)) return;
+
   const regs = await navigator.serviceWorker.getRegistrations();
   await Promise.all(regs.map((r) => r.unregister()));
 }
