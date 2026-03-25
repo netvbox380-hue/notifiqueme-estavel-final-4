@@ -25,7 +25,6 @@ if (typeof window !== "undefined") {
   });
 }
 
-
 const handleApiError = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
   if (typeof window === "undefined") return;
@@ -86,8 +85,32 @@ createRoot(document.getElementById("root")!).render(
 );
 
 // Registro centralizado do PWA / Service Worker
-if (import.meta.env.PROD) {
-  window.addEventListener("load", () => {
-    void registerServiceWorker();
-  });
+if (
+  import.meta.env.PROD &&
+  typeof window !== "undefined" &&
+  "serviceWorker" in navigator
+) {
+  const registerPWAOnce = async () => {
+    try {
+      const reg = await registerServiceWorker();
+      console.log("[PWA] Service Worker registrado com sucesso:", reg);
+
+      // força checagem de atualização periódica
+      setInterval(() => {
+        void reg.update();
+      }, 30000);
+    } catch (error) {
+      console.error("[PWA] Erro ao registrar Service Worker:", error);
+    }
+  };
+
+  if (document.readyState === "complete") {
+    void registerPWAOnce();
+  } else {
+    window.addEventListener("load", () => {
+      void registerPWAOnce();
+    }, { once: true });
+  }
+} else {
+  console.warn("[PWA] Service Worker indisponível neste ambiente.");
 }
